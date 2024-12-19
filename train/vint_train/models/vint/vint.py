@@ -79,13 +79,13 @@ class ViNT(BaseModel):
         )   
 
     def forward(
-        self, obs_img: torch.tensor, goal_command: int,
+        self, obs_img: torch.tensor, goal_command: torch.tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         
         # Encode the command
-        z_i = self.latent_dict[goal_command]  
-        goal_encoding = self.command_mlp(z_i)  # Shape: [goal_encoding_size]
+        z_i = self.latent_dict[goal_command.long()]
+        goal_encoding = self.command_mlp(z_i)  # Shape: [batch size, goal_encoding_size]
         
         #convert to [batch_size, 1, goal_encoding_size]
         goal_encoding = goal_encoding.unsqueeze(0).unsqueeze(0)
