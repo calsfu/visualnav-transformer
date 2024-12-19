@@ -27,3 +27,30 @@ sacson:
   odom_process_func: "nav_to_xy_yaw"
 
 # add your own datasets below:
+
+control:
+  odomtopics: "/odometry"
+  imtopics: "/camera/control"
+  ang_offset: 0.0
+  img_process_func: "custom_img"
+  odom_process_func: "custom_odom"
+  resx: 640
+  resy: 480
+
+wide:
+  odomtopics: "/odometry"
+  imtopics: "/camera/wide"
+  ang_offset: 0.0
+  img_process_func: "custom_img"
+  odom_process_func: "custom_odom"
+  resx: 1920
+  resy: 480
+
+composed:
+  odomtopics: "/odometry"
+  imtopics: "/camera/composed"
+  ang_offset: 0.0
+  img_process_func: "custom_img"
+  odom_process_func: "custom_odom"
+  resx: 640
+  resy: 480

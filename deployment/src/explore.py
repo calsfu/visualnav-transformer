@@ -15,8 +15,9 @@ import rospy
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, Float32MultiArray
 from utils import msg_to_pil, to_numpy, transform_images, load_model
-
-from vint_train.training.train_utils import get_action
+import sys
+sys.path.append("/home/linden/Desktop/ViNT/visualnav-transformer/train/vint_train/training")
+from train_utils import get_action
 import torch
 from PIL import Image as PILImage
 import numpy as np

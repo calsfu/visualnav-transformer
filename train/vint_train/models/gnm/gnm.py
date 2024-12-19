@@ -3,8 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from typing import List, Dict, Optional, Tuple
-from vint_train.models.gnm.modified_mobilenetv2 import MobileNetEncoder
-from vint_train.models.base_model import BaseModel
+import sys
+sys.path.append("/home/linden/Desktop/ViNT/visualnav-transformer/train/vint_train/models/gnm")
+from modified_mobilenetv2 import MobileNetEncoder
+sys.path.append("/home/linden/Desktop/ViNT/visualnav-transformer/train/vint_train/models")
+from base_model_extra import BaseModel
 
 
 class GNM(BaseModel):

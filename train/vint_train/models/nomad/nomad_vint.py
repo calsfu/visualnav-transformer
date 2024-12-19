@@ -4,7 +4,10 @@ import torch.nn.functional as F
 import torchvision
 from typing import List, Dict, Optional, Tuple, Callable
 from efficientnet_pytorch import EfficientNet
-from vint_train.models.vint.self_attention import PositionalEncoding
+
+import sys
+sys.path.append("/home/linden/Desktop/ViNT/visualnav-transformer/train/vint_train/models/vint")
+from self_attention import PositionalEncoding
 
 class NoMaD_ViNT(nn.Module):
     def __init__(

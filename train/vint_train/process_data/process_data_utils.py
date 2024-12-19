@@ -6,18 +6,19 @@ from PIL import Image
 import cv2
 from typing import Any, Tuple, List, Dict
 import torchvision.transforms.functional as TF
+import time
 
-IMAGE_SIZE = (160, 120)
+IMAGE_SIZE = (320, 240) #(160, 120)
 IMAGE_ASPECT_RATIO = 4 / 3
 
 
-def process_images(im_list: List, img_process_func) -> List:
+def process_images(im_list: List, img_process_func, resx, resy) -> List:
     """
     Process image data from a topic that publishes ros images into a list of PIL images
     """
     images = []
     for img_msg in im_list:
-        img = img_process_func(img_msg)
+        img = img_process_func(img_msg, resx, resy)
         images.append(img)
     return images
 
@@ -61,9 +62,16 @@ def process_scand_img(msg) -> Image:
     img = img.resize(IMAGE_SIZE)
     return img
 
+def custom_img(msg, resx, resy) -> Image:
+    img = np.empty(resx * resy * 3)
+    for i in range(resx * resy * 3):
+        img[i] = msg.data[i]
+    img = np.reshape(img, (resy, resx, 3))
+    pil_image = Image.fromarray(img.astype(np.uint8))
+    return pil_image
 
 ############## Add custom image processing functions here #############
-
+    
 def process_sacson_img(msg) -> Image:
     np_arr = np.fromstring(msg.data, np.uint8)
     image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -106,6 +114,12 @@ def nav_to_xy_yaw(odom_msg, ang_offset: float) -> Tuple[List[float], float]:
     return [position.x, position.y], yaw
 
 
+def custom_odom(odom_msg, ang_offset: float) -> Tuple[List[float], float]:
+    # dont use ang_offset
+    ack = np.asarray(odom_msg.data)
+    # [ack.location.x, ack.location.y, ack.location.z, ack.rotation.yaw]
+    return [ack[0], ack[1]], ack[3]
+
 ############ Add custom odometry processing functions here ############
 
 
@@ -120,6 +134,8 @@ def get_images_and_odom(
     odom_process_func: Any,
     rate: float = 4.0,
     ang_offset: float = 0.0,
+    resx: int = 320,
+    resy: int = 240,
 ):
     """
     Get image and odom data from a bag file
@@ -176,7 +192,12 @@ def get_images_and_odom(
                 synced_odomdata.append(curr_odomdata)
                 currtime = t.to_sec()
 
-    img_data = process_images(synced_imdata, img_process_func)
+    img_data = process_images(
+        synced_imdata, 
+        img_process_func,
+        resx,
+        resy,
+    )
     traj_data = process_odom(
         synced_odomdata,
         odom_process_func,

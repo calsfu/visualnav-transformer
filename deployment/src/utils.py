@@ -5,7 +5,7 @@ import io
 import matplotlib.pyplot as plt
 
 # ROS
-from sensor_msgs.msg import Image
+# from sensor_msgs.msg import Image
 
 # pytorch
 import torch
@@ -18,14 +18,21 @@ from PIL import Image as PILImage
 from typing import List, Tuple, Dict, Optional
 
 # models
-from vint_train.models.gnm.gnm import GNM
-from vint_train.models.vint.vint import ViNT
-
-from vint_train.models.vint.vit import ViT
-from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
-from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
-from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
-from vint_train.data.data_utils import IMAGE_ASPECT_RATIO
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
+sys.path.append("../..")
+#from train.vint_train.models.gnm.gnm import GNM
+sys.path.append("/home/coler/CARLA_0.9.15/PythonAPI/visualnav-transformer/train/vint_train/models/gnm")
+from gnm import GNM
+sys.path.append("/home/coler/CARLA_0.9.15/PythonAPI/visualnav-transformer/train/vint_train/models/vint")
+from vint import ViNT
+from vit import ViT
+sys.path.append("/home/coler/CARLA_0.9.15/PythonAPI/visualnav-transformer/train/vint_train/models/nomad")
+# from nomad import NoMaD, DenseNetwork
+# from nomad_vint import NoMaD_ViNT, replace_bn_with_gn
+from diffusion_policy.diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
+sys.path.append("/home/coler/CARLA_0.9.15/PythonAPI/visualnav-transformer/train/vint_train/data")
+from data_utils import IMAGE_ASPECT_RATIO
 
 
 def load_model(
@@ -111,20 +118,20 @@ def load_model(
     return model
 
 
-def msg_to_pil(msg: Image) -> PILImage.Image:
-    img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-        msg.height, msg.width, -1)
-    pil_image = PILImage.fromarray(img)
-    return pil_image
+# def msg_to_pil(msg: Image) -> PILImage.Image:
+#     img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+#         msg.height, msg.width, -1)
+#     pil_image = PILImage.fromarray(img)
+#     return pil_image
 
 
-def pil_to_msg(pil_img: PILImage.Image, encoding="mono8") -> Image:
-    img = np.asarray(pil_img)  
-    ros_image = Image(encoding=encoding)
-    ros_image.height, ros_image.width, _ = img.shape
-    ros_image.data = img.ravel().tobytes() 
-    ros_image.step = ros_image.width
-    return ros_image
+# def pil_to_msg(pil_img: PILImage.Image, encoding="mono8") -> Image:
+#     img = np.asarray(pil_img)  
+#     ros_image = Image(encoding=encoding)
+#     ros_image.height, ros_image.width, _ = img.shape
+#     ros_image.data = img.ravel().tobytes() 
+#     ros_image.step = ros_image.width
+#     return ros_image
 
 
 def to_numpy(tensor):
@@ -154,7 +161,7 @@ def transform_images(pil_imgs: List[PILImage.Image], image_size: List[int], cent
         transf_img = transform_type(pil_img)
         transf_img = torch.unsqueeze(transf_img, 0)
         transf_imgs.append(transf_img)
-    return torch.cat(transf_imgs, dim=1)
+    return torch.cat(transf_imgs, dim=0)
     
 
 # clip angle between -pi and pi

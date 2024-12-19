@@ -52,6 +52,8 @@ def main(args: argparse.Namespace):
             eval(config[args.dataset_name]["odom_process_func"]),
             rate=args.sample_rate,
             ang_offset=config[args.dataset_name]["ang_offset"],
+            resx=config[args.dataset_name]["resx"],
+            resy=config[args.dataset_name]["resy"],
         )
 
   

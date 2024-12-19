@@ -20,12 +20,15 @@ from diffusers.optimization import get_scheduler
 """
 IMPORT YOUR MODEL HERE
 """
+import sys
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
 from vint_train.models.gnm.gnm import GNM
 from vint_train.models.vint.vint import ViNT
 from vint_train.models.vint.vit import ViT
 from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
 from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
-from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
+from diffusion_policy.diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 
 
 from vint_train.data.vint_dataset import ViNT_Dataset

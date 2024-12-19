@@ -53,11 +53,19 @@ carla_cil:
 carla_intvns:
   metric_waypoint_spacing: 1.39
 
-carla:
-  metric_waypoint_spacing: 1.59
-  image_path_func: get_image_path
+control:
+  metric_waypoint_spacing: 2. # ~ 30km/h = ~ 8m/s @ 4hz = 2m/waypoint
+
+wide:
+  metric_waypoint_spacing: 2. # ~ 30km/h = ~ 8m/s @ 4hz = 2m/waypoint
+
+composed:
+  metric_waypoint_spacing: 2. # ~ 30km/h = ~ 8m/s @ 4hz = 2m/waypoint
 
 sacson:
   metric_waypoint_spacing: 0.255
+
+wide:
+  metric_waypoint_spacing: 1.39
 
 # add your own dataset params here:

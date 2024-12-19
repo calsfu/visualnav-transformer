@@ -8,6 +8,7 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 import matplotlib.pyplot as plt
 import yaml
+# import pygame
 
 # ROS
 import rospy
@@ -15,7 +16,9 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, Float32MultiArray
 from utils import msg_to_pil, to_numpy, transform_images, load_model
 
-from vint_train.training.train_utils import get_action
+import sys
+sys.path.append("/home/linden/Desktop/cole_vint/visualnav-transformer/train/vint_train/training")
+from train_utils import get_action
 import torch
 from PIL import Image as PILImage
 import numpy as np
@@ -87,24 +90,6 @@ def main(args: argparse.Namespace):
     model = model.to(device)
     model.eval()
 
-    
-     # load topomap
-    topomap_filenames = sorted(os.listdir(os.path.join(
-        TOPOMAP_IMAGES_DIR, args.dir)), key=lambda x: int(x.split(".")[0]))
-    topomap_dir = f"{TOPOMAP_IMAGES_DIR}/{args.dir}"
-    num_nodes = len(os.listdir(topomap_dir))
-    topomap = []
-    for i in range(num_nodes):
-        image_path = os.path.join(topomap_dir, topomap_filenames[i])
-        topomap.append(PILImage.open(image_path))
-
-    closest_node = 0
-    assert -1 <= args.goal_node < len(topomap), "Invalid goal index"
-    if args.goal_node == -1:
-        goal_node = len(topomap) - 1
-    else:
-        goal_node = args.goal_node
-    reached_goal = False
 
      # ROS
     rospy.init_node("EXPLORATION", anonymous=False)
@@ -115,6 +100,14 @@ def main(args: argparse.Namespace):
         WAYPOINT_TOPIC, Float32MultiArray, queue_size=1)  
     sampled_actions_pub = rospy.Publisher(SAMPLED_ACTIONS_TOPIC, Float32MultiArray, queue_size=1)
     goal_pub = rospy.Publisher("/topoplan/reached_goal", Bool, queue_size=1)
+
+    # #pygame to record keystrokes
+    # pygame.init()
+
+
+    # MAX_KEYSTROKES = 10
+    # keystrokes = []
+    # cmd_capture = pygame.display.set_mode((100,100))
 
     print("Registered with master node. Waiting for image observations...")
 
@@ -131,97 +124,121 @@ def main(args: argparse.Namespace):
         # EXPLORATION MODE
         chosen_waypoint = np.zeros(4)
         if len(context_queue) > model_params["context_size"]:
-            if model_params["model_type"] == "nomad":
-                obs_images = transform_images(context_queue, model_params["image_size"], center_crop=False)
-                obs_images = torch.split(obs_images, 3, dim=1)
-                obs_images = torch.cat(obs_images, dim=1) 
-                obs_images = obs_images.to(device)
-                mask = torch.zeros(1).long().to(device)  
+            # if model_params["model_type"] == "nomad":
+            #     obs_images = transform_images(context_queue, model_params["image_size"], center_crop=False)
+            #     obs_images = torch.split(obs_images, 3, dim=1)
+            #     obs_images = torch.cat(obs_images, dim=1) 
+            #     obs_images = obs_images.to(device)
+            #     mask = torch.zeros(1).long().to(device)  
 
-                start = max(closest_node - args.radius, 0)
-                end = min(closest_node + args.radius + 1, goal_node)
-                goal_image = [transform_images(g_img, model_params["image_size"], center_crop=False).to(device) for g_img in topomap[start:end + 1]]
-                goal_image = torch.concat(goal_image, dim=0)
+            #     start = max(closest_node - args.radius, 0)
+            #     end = min(closest_node + args.radius + 1, goal_node)
+            #     goal_image = [transform_images(g_img, model_params["image_size"], center_crop=False).to(device) for g_img in topomap[start:end + 1]]
+            #     goal_image = torch.concat(goal_image, dim=0)
 
-                obsgoal_cond = model('vision_encoder', obs_img=obs_images.repeat(len(goal_image), 1, 1, 1), goal_img=goal_image, input_goal_mask=mask.repeat(len(goal_image)))
-                dists = model("dist_pred_net", obsgoal_cond=obsgoal_cond)
-                dists = to_numpy(dists.flatten())
-                min_idx = np.argmin(dists)
-                closest_node = min_idx + start
-                print("closest node:", closest_node)
-                sg_idx = min(min_idx + int(dists[min_idx] < args.close_threshold), len(obsgoal_cond) - 1)
-                obs_cond = obsgoal_cond[sg_idx].unsqueeze(0)
+            #     obsgoal_cond = model('vision_encoder', obs_img=obs_images.repeat(len(goal_image), 1, 1, 1), goal_img=goal_image, input_goal_mask=mask.repeat(len(goal_image)))
+            #     dists = model("dist_pred_net", obsgoal_cond=obsgoal_cond)
+            #     dists = to_numpy(dists.flatten())
+            #     min_idx = np.argmin(dists)
+            #     closest_node = min_idx + start
+            #     print("closest node:", closest_node)
+            #     sg_idx = min(min_idx + int(dists[min_idx] < args.close_threshold), len(obsgoal_cond) - 1)
+            #     obs_cond = obsgoal_cond[sg_idx].unsqueeze(0)
 
-                # infer action
-                with torch.no_grad():
-                    # encoder vision features
-                    if len(obs_cond.shape) == 2:
-                        obs_cond = obs_cond.repeat(args.num_samples, 1)
-                    else:
-                        obs_cond = obs_cond.repeat(args.num_samples, 1, 1)
+            #     # infer action
+            #     with torch.no_grad():
+            #         # encoder vision features
+            #         if len(obs_cond.shape) == 2:
+            #             obs_cond = obs_cond.repeat(args.num_samples, 1)
+            #         else:
+            #             obs_cond = obs_cond.repeat(args.num_samples, 1, 1)
                     
-                    # initialize action from Gaussian noise
-                    noisy_action = torch.randn(
-                        (args.num_samples, model_params["len_traj_pred"], 2), device=device)
-                    naction = noisy_action
+            #         # initialize action from Gaussian noise
+            #         noisy_action = torch.randn(
+            #             (args.num_samples, model_params["len_traj_pred"], 2), device=device)
+            #         naction = noisy_action
 
-                    # init scheduler
-                    noise_scheduler.set_timesteps(num_diffusion_iters)
+            #         # init scheduler
+            #         noise_scheduler.set_timesteps(num_diffusion_iters)
 
-                    start_time = time.time()
-                    for k in noise_scheduler.timesteps[:]:
-                        # predict noise
-                        noise_pred = model(
-                            'noise_pred_net',
-                            sample=naction,
-                            timestep=k,
-                            global_cond=obs_cond
-                        )
-                        # inverse diffusion step (remove noise)
-                        naction = noise_scheduler.step(
-                            model_output=noise_pred,
-                            timestep=k,
-                            sample=naction
-                        ).prev_sample
-                    print("time elapsed:", time.time() - start_time)
+            #         start_time = time.time()
+            #         for k in noise_scheduler.timesteps[:]:
+            #             # predict noise
+            #             noise_pred = model(
+            #                 'noise_pred_net',
+            #                 sample=naction,
+            #                 timestep=k,
+            #                 global_cond=obs_cond
+            #             )
+            #             # inverse diffusion step (remove noise)
+            #             naction = noise_scheduler.step(
+            #                 model_output=noise_pred,
+            #                 timestep=k,
+            #                 sample=naction
+            #             ).prev_sample
+            #         print("time elapsed:", time.time() - start_time)
 
-                naction = to_numpy(get_action(naction))
-                sampled_actions_msg = Float32MultiArray()
-                sampled_actions_msg.data = np.concatenate((np.array([0]), naction.flatten()))
-                print("published sampled actions")
-                sampled_actions_pub.publish(sampled_actions_msg)
-                naction = naction[0] 
-                chosen_waypoint = naction[args.waypoint]
+            #     naction = to_numpy(get_action(naction))
+            #     sampled_actions_msg = Float32MultiArray()
+            #     sampled_actions_msg.data = np.concatenate((np.array([0]), naction.flatten()))
+            #     print("published sampled actions")
+            #     sampled_actions_pub.publish(sampled_actions_msg)
+            #     naction = naction[0] 
+            #     chosen_waypoint = naction[args.waypoint]
+            # else:
+            distances = []
+            waypoints = []
+            batch_obs_imgs = []
+            batch_goal_data = []
+
+            # observation images
+            transf_obs_img = transform_images(context_queue, model_params["image_size"])
+            goal_data = torch.eye(3).int().to(device)
+            goal_data[0] = 1
+            # # command data
+            # if not keystrokes:
+            #     # command = "straight"
+            #     goal_data = eye_mat[1]
+            #     print("no key pressed")
+            # elif(keystrokes[-1] == pygame.K_LEFT):
+            #     # command = "left"  #   logic to determine the command
+            #     goal_data = eye_mat[0]
+            #     print("l")
+            # elif(keystrokes[-1] == pygame.K_UP):
+            #     # command = "straight"  # logic to determine the command
+            #     goal_data = eye_mat[1]
+            #     print("^")
+            # elif(keystrokes[-1] == pygame.K_RIGHT):
+            #     # command = "right"  #   logic to determine the command
+            #     goal_data = eye_mat[2]
+            #     print("r")
+            # else:
+            #     print("wrong key")
+            #     # command = "straight"
+            #     goal_data = eye_mat[1]
+            # goal_data = transform_images(sg_img, model_params["image_size"])
+            
+            
+            batch_obs_imgs.append(transf_obs_img)
+            batch_goal_data.append(goal_data)
+                
+            # predict distances and waypoints
+            batch_obs_imgs = torch.cat(batch_obs_imgs, dim=0).to(device)
+            batch_goal_data = torch.cat(batch_goal_data, dim=0).to(device)
+
+            distances, waypoints = model(batch_obs_imgs, batch_goal_data)
+            distances = to_numpy(distances)
+            waypoints = to_numpy(waypoints)
+            # look for closest node
+            min_dist_idx = np.argmin(distances)
+            # chose subgoal and output waypoints
+            if distances[min_dist_idx] > args.close_threshold:
+                chosen_waypoint = waypoints[min_dist_idx][args.waypoint]
+                closest_node = start + min_dist_idx
             else:
-                start = max(closest_node - args.radius, 0)
-                end = min(closest_node + args.radius + 1, goal_node)
-                distances = []
-                waypoints = []
-                batch_obs_imgs = []
-                batch_goal_data = []
-                for i, sg_img in enumerate(topomap[start: end + 1]):
-                    transf_obs_img = transform_images(context_queue, model_params["image_size"])
-                    goal_data = transform_images(sg_img, model_params["image_size"])
-                    batch_obs_imgs.append(transf_obs_img)
-                    batch_goal_data.append(goal_data)
-                    
-                # predict distances and waypoints
-                batch_obs_imgs = torch.cat(batch_obs_imgs, dim=0).to(device)
-                batch_goal_data = torch.cat(batch_goal_data, dim=0).to(device)
-
-                distances, waypoints = model(batch_obs_imgs, batch_goal_data)
-                distances = to_numpy(distances)
-                waypoints = to_numpy(waypoints)
-                # look for closest node
-                min_dist_idx = np.argmin(distances)
-                # chose subgoal and output waypoints
-                if distances[min_dist_idx] > args.close_threshold:
-                    chosen_waypoint = waypoints[min_dist_idx][args.waypoint]
-                    closest_node = start + min_dist_idx
-                else:
-                    chosen_waypoint = waypoints[min(
-                        min_dist_idx + 1, len(waypoints) - 1)][args.waypoint]
-                    closest_node = min(start + min_dist_idx + 1, goal_node)
+                chosen_waypoint = waypoints[min(
+                    min_dist_idx + 1, len(waypoints) - 1)][args.waypoint]
+                closest_node = min(start + min_dist_idx + 1, goal_node)
         # RECOVERY MODE
         if model_params["normalize"]:
             chosen_waypoint[:2] *= (MAX_V / RATE)  

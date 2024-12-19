@@ -20,19 +20,20 @@
 
 
 subscribers:
-  - name:        "gnm vels"
+  - name:        "navigation"
     topic:       "/cmd_vel_mux/input/navi"
     timeout:     0.1
     priority:    0
-    short_desc:  "The default cmd_vel, controllers unaware that we are multiplexing cmd_vel should come here"
+    short_desc:  "The default cmd_vel for navigation stack commands"
   - name:        "teleop"
     topic:       "/cmd_vel_mux/input/teleop"
     timeout:     0.5
     priority:    2
-    short_desc:  "Navigation stack controller"
-  - name:       "gnm recovery"
+    short_desc:  "Joystick or teleoperation commands"
+  - name:        "recovery"
     topic:       "/cmd_vel_mux/input/recovery"
     timeout:     0.1
     priority:    1
-publisher:       "/mobile_base/commands/velocity"
+    short_desc:  "Recovery behaviors or safety commands"
+publisher:       "/cmd_vel"
        
