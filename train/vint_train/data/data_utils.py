@@ -97,6 +97,7 @@ def transform_images(
     img: Image.Image, transform: transforms, image_resize_size: Tuple[int, int], aspect_ratio: float = IMAGE_ASPECT_RATIO
 ):
     w, h = img.size
+    
     if w > h:
         img = TF.center_crop(img, (h, int(h * aspect_ratio)))  # crop to the right ratio
     else:

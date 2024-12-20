@@ -122,6 +122,8 @@ class ViNT(BaseModel):
         dist_pred = self.dist_predictor(final_repr)
         action_pred = self.action_predictor(final_repr)
 
+      
+
         # augment outputs to match labels size-wise
         action_pred = action_pred.reshape(
             (action_pred.shape[0], self.len_trajectory_pred, self.num_action_params)

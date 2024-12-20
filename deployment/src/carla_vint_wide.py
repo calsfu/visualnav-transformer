@@ -20,7 +20,6 @@ import argparse
 import yaml
 import time
 import random
-import math
 from utils import to_numpy, transform_images, load_model
 
 # UTILS
@@ -44,8 +43,8 @@ import carla
 MODEL_WEIGHTS_PATH = "../model_weights"
 MODEL_CONFIG_PATH = "../config/models.yaml"
 EPS = 1e-8
-MAX_SPEED = 10
-MAX_STEERING_ANGLE = 0.610865
+MAX_V = 10
+MAX_W = .5
 
 # GLOBALS
 subgoal = []
@@ -54,11 +53,15 @@ subgoal = []
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-camera_tick = 1.5
-camera_pixels_x = 320 #1280
-camera_pixels_y = 240 #800
+# camera_tick = 1.5
+# camera_pixels_x = 320 #1280
+# camera_pixels_y = 240 #800
+# camera_horiz_fov = 72
+camera_hz = 4
+camera_freq = 1. / float(camera_hz)
+camera_pixels_x = 160 #320 * 2 #1280
+camera_pixels_y = 120 #240 * 2 #800
 camera_horiz_fov = 72
-
 class CarlaVint:
     def __init__(self,
                 carla_port = 2000):
@@ -66,7 +69,6 @@ class CarlaVint:
         #config
         self.dt = 0.05
         self.close_threshold = 3
-        self.command = 1
 
         # connect to client
         self.client = carla.Client('localhost', carla_port)
@@ -76,6 +78,13 @@ class CarlaVint:
         self.world = self.client.load_world('Town01')
         self.map = self.world.get_map()
 
+        self.saved_left = None
+        self.saved_right = None
+        self.saved_mid = None
+
+        spawn_points = self.world.get_map().get_spawn_points()
+        number_of_spawn_points = len(spawn_points)
+
         # Spawn ego vehicle
         ego_bp = self.world.get_blueprint_library().find('vehicle.tesla.model3')
         ego_bp.set_attribute('role_name','ego')
@@ -84,11 +93,9 @@ class CarlaVint:
         ego_bp.set_attribute('color',ego_color)
         print('\nEgo color is set')
 
-        spawn_points = self.world.get_map().get_spawn_points()
-        number_of_spawn_points = len(spawn_points)
-
         if 0 < number_of_spawn_points:
-            ego_transform = random.choice(spawn_points)
+            #random.shuffle(spawn_points)
+            ego_transform = spawn_points[0]
             self.vehicle = self.world.spawn_actor(ego_bp,ego_transform)
             print('\nEgo is spawned')
         else: 
@@ -96,6 +103,40 @@ class CarlaVint:
 
         spector = self.world.get_spectator()
         spector.set_transform(self.vehicle.get_transform())
+
+        # Spawn ego vehicle
+        cam_bp = None
+        cam_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        cam_bp.set_attribute("image_size_x",str(camera_pixels_x))
+        cam_bp.set_attribute("image_size_y",str(camera_pixels_y))
+        cam_bp.set_attribute("fov",str(camera_horiz_fov))
+        # cam_bp.set_attribute("sensor_tick",str(camera_freq))
+        cam_location = carla.Location(2,0,1)
+        cam_rotation = carla.Rotation(0,360 - 72,0)
+        cam_transform = carla.Transform(cam_location,cam_rotation)
+        self.ego_left = self.world.spawn_actor(cam_bp,cam_transform,attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+
+        cam_bp = None
+        cam_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        cam_bp.set_attribute("image_size_x",str(camera_pixels_x))
+        cam_bp.set_attribute("image_size_y",str(camera_pixels_y))
+        cam_bp.set_attribute("fov",str(camera_horiz_fov))
+        # cam_bp.set_attribute("sensor_tick",str(camera_freq))
+        cam_location = carla.Location(2,0,1)
+        cam_rotation = carla.Rotation(0,0,0)
+        cam_transform = carla.Transform(cam_location,cam_rotation)
+        self.ego_mid = self.world.spawn_actor(cam_bp,cam_transform,attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+
+        cam_bp = None
+        cam_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        cam_bp.set_attribute("image_size_x",str(camera_pixels_x))
+        cam_bp.set_attribute("image_size_y",str(camera_pixels_y))
+        cam_bp.set_attribute("fov",str(camera_horiz_fov))
+        # cam_bp.set_attribute("sensor_tick",str(camera_freq))
+        cam_location = carla.Location(2,0,1)
+        cam_rotation = carla.Rotation(0,72,0)
+        cam_transform = carla.Transform(cam_location,cam_rotation)
+        self.ego_right = self.world.spawn_actor(cam_bp,cam_transform,attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
 
         # Spawn camera
         cam_bp = None
@@ -109,21 +150,30 @@ class CarlaVint:
         cam_transform = carla.Transform(cam_location,cam_rotation)
         self.ego_lone = self.world.spawn_actor(cam_bp,cam_transform,attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
 
-        # lane invasion sensor
-        lane_bp = self.world.get_blueprint_library().find('sensor.other.lane_invasion')
-        lane_location = carla.Location(0,0,0)
-        lane_rotation = carla.Rotation(0,0,0)
-        lane_transform = carla.Transform(lane_location,lane_rotation)
-        self.lane_sensor = self.world.spawn_actor(lane_bp,lane_transform,attach_to=self.vehicle, attachment_type=carla.AttachmentType.Rigid)
+        def save_left(image):
+            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (image.height, image.width, 4))
+            array = array[:, :, :3]
+            array = array[:, :, ::-1]
+            self.saved_left = array
 
-        self.is_invaded = False
-        self.count = 0
-        self.invade_count = 0
-        def save_lane(event):
-            self.is_invaded = True
-            # print("Lane invasion")
+        def save_mid(image):
+            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (image.height, image.width, 4))
+            array = array[:, :, :3]
+            array = array[:, :, ::-1]
+            self.saved_mid = array
 
-        self.lane_sensor.listen(lambda event: save_lane(event))
+        def save_right(image):
+            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (image.height, image.width, 4))
+            array = array[:, :, :3]
+            array = array[:, :, ::-1]
+            self.saved_right = array
+
+        self.ego_left.listen(lambda image: save_left(image))
+        self.ego_mid.listen(lambda image: save_mid(image))
+        self.ego_right.listen(lambda image: save_right(image))
 
         self.camera_display = self.world.spawn_actor(
                 self.world.get_blueprint_library().find('sensor.camera.rgb'),
@@ -134,14 +184,13 @@ class CarlaVint:
             array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8")).reshape(
                 image.height, image.width, -1)
             array = array[:, :, :3]
-            array = array[:, :, ::-1]
             image = PILImage.fromarray(array)
-            if self.context_size is not None:
-                if len(self.context_queue) < self.context_size + 1:
-                    self.context_queue.append(image)
-                else:
-                    self.context_queue.pop(0)
-                    self.context_queue.append(image)
+            # if self.context_size is not None:
+            #     if len(self.context_queue) < self.context_size + 1:
+            #         self.context_queue.append(image)
+            #     else:
+            #         self.context_queue.pop(0)
+            #         self.context_queue.append(image)
 
         def update_display(image):
             array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8")).reshape(
@@ -151,20 +200,14 @@ class CarlaVint:
             array = array.swapaxes(0, 1)
             surface = pygame.surfarray.make_surface(array)
             self.display.blit(surface, (0, 0))
-            self.display.blit(self.font.render(f'{self.command_dict[self.command]}', True, (0,0,0)), (10, 10))
-
 
         self.ego_lone.listen(lambda image: save_lone(image))
         self.camera_display.listen(lambda image: update_display(image))
 
         # render at get keyboard control
         pygame.init()
-        self.display = pygame.display.set_mode((camera_pixels_x * 2,2 * camera_pixels_y), pygame.HWSURFACE | pygame.DOUBLEBUF)
+        self.display = pygame.display.set_mode((camera_pixels_x * 4,4 * camera_pixels_y), pygame.HWSURFACE | pygame.DOUBLEBUF)
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(None, 30)
-        self.command_dict = {0: "LEFT", 1: "STRAIGHT", 2: "RIGHT"}
-
-
 
         # VINT SETUP
         # global context_size
@@ -182,7 +225,7 @@ class CarlaVint:
         self.context_size = self.model_params["context_size"]
 
         # load model weights
-        ckpth_path = '../model_weights/fourhr.pth'
+        ckpth_path = '../model_weights/wide.pth'
         if os.path.exists(ckpth_path):
             print(f"Loading model from {ckpth_path}")
         else:
@@ -199,45 +242,42 @@ class CarlaVint:
     def step(self):
         # print(len(self.context_queue))
         pygame.event.clear()
-
+        if self.saved_left is None or self.saved_mid is None or self.saved_right is None:
+            return
+        self.context_queue.append(PILImage.fromarray(np.concatenate([self.saved_left, self.saved_mid, self.saved_right], axis=1)[:,::3,:]))
+        if(len(self.context_queue) > self.model_params["context_size"] + 1):
+            self.context_queue.pop(0)
         if len(self.context_queue) > self.model_params["context_size"]:
+            
             transf_obs_imgs = transform_images(self.context_queue, self.model_params["image_size"]).to(device)
-
-            # save first image from transf_obs_imgs
-            # if self.count % 10 == 0:
-            #     img = transf_obs_imgs[0].cpu().numpy().transpose(1, 2, 0)
-            #     img = (img * 255).astype(np.uint8)
-            #     img = PILImage.fromarray(img)
-                # img.save(f'./data/9{self.count}.jpg')
-
-            # if self.count % 10 == 0:
-            #     self.context_queue[0].save(f'./data/9{self.count}.jpg')
-
 
             # events  = pygame.event.get()
             # if events:
             #     if events[-1].type == pygame.QUIT:
             #         pygame.quit()
             #         sys.exit()
-
-            #shape of transf obs
-            # print(transf_obs_imgs.shape)
             
+            
+
+            # one hot of size 3
+            # goal_data = torch.zeros((1, 3), dtype=torch.int64)
 
             # get continous key press of left arrow, up arrow, right arrow
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LEFT]:
-                self.command = 0
+                goal_data = 0
             elif keys[pygame.K_RIGHT]:
-                self.command = 2
+                goal_data = 2
             else:
-                self.command = 1
+                goal_data = 1
+            
 
-            goal_data = torch.tensor(self.command).to(device)
+            goal_data = torch.tensor(goal_data).to(device)
 
             
             # transf_obs_imgs = torch.cat(transf_obs_imgs, dim=0).to(device)
             # goal_data = torch.cat(goal_data, dim=0).to(device)
+            # print(transf_obs_imgs.shape)
             distances, waypoints = self.model(transf_obs_imgs, goal_data)
 
             distances = to_numpy(distances)
@@ -247,14 +287,14 @@ class CarlaVint:
             min_dist_idx = np.argmin(distances)
            
             # chose subgoal and output waypoints
-            # if distances[min_dist_idx] > self.close_threshold:
-            chosen_waypoint = waypoints[min_dist_idx][2]
-            # else:
-            #     chosen_waypoint = waypoints[min(
-            #         min_dist_idx + 1, len(waypoints) - 1)][2]
-            print(waypoints)
-            speed, steer = self._ackerman_control(chosen_waypoint)
-            # print(f"Speed: {speed}, Steer: {steer}")
+            if distances[min_dist_idx] > self.close_threshold:
+                chosen_waypoint = waypoints[min_dist_idx][1]
+            else:
+                chosen_waypoint = waypoints[min(
+                    min_dist_idx + 1, len(waypoints) - 1)][1]
+                
+            speed, steer = self._controller(chosen_waypoint)
+            print(f"Speed: {speed}, Steer: {steer}")
 
             ackerman = carla.VehicleAckermannControl(steer=steer,speed=speed)
             self.vehicle.apply_ackermann_control(ackerman)
@@ -262,10 +302,6 @@ class CarlaVint:
         # self.world.wait_for_tick(0.05) # wait for next camera update
         self.world.tick()
         self.clock.tick()
-        self.count += 1
-        if self.is_invaded:
-            self.invade_count += 1
-            self.is_invaded = False
         pygame.display.flip()
         pygame.event.clear()
         # time.sleep(.5)
@@ -279,45 +315,30 @@ class CarlaVint:
             self.vehicle.destroy()
             self.ego_lone.destroy()
             self.camera_display.destroy()
+            self.ego_left.destroy()
+            self.ego_mid.destroy()
+            self.ego_right.destroy()
             pygame.quit()
-            if self.count > 0:
-                print(self.invade_count/self.count)
-    
-    def _ackerman_control(self, waypoint):
-        """
-        Compute the speed and steering angle to move the car toward the relative waypoint.
-        
-        Parameters:
-            car_pos (tuple): (x, y) position of the car.
-            car_heading (float): Current heading angle of the car (in radians).
-            relative_waypoint (tuple): (dx, dy) relative waypoint in the car's local frame.
 
-        Returns:
-            speed (float): Speed to move the car.
-            steering_angle (float): Steering angle for Ackerman steering.
-        """
-        # Extract relative waypoint in local frame
+    def _controller(self, waypoint):
+        assert len(waypoint) == 2 or len(waypoint) == 4, "waypoint must be a 2D or 4D vector"
         if len(waypoint) == 2:
             dx, dy = waypoint
         else:
             dx, dy, hx, hy = waypoint
-
-        # Compute distance to the waypoint
-        distance = math.sqrt(dx**2 + dy**2)
-
-        # Target angle in the local frame
-        target_angle = math.atan2(dy, dx)
-
-        # Compute heading error
-        heading_error = target_angle  # Since it's in the local frame, no need to subtract car_heading
-
-        # Compute speed (proportional to distance)
-        speed = min(MAX_SPEED, distance * 5)
-
-        # Compute steering angle (proportional to heading error)
-        steering_angle = max(-MAX_STEERING_ANGLE, min(MAX_STEERING_ANGLE, heading_error))
-
-        return speed, steering_angle
+        # this controller only uses the predicted heading if dx and dy near zero
+        if len(waypoint) == 4 and np.abs(dx) < EPS and np.abs(dy) < EPS:
+            v = 0
+            w = np.clip(np.arctan2(hy, hx), -np.pi, np.pi)/self.dt		
+        elif np.abs(dx) < EPS:
+            v =  0
+            w = np.sign(dy) * np.pi/(2*self.dt)
+        else:
+            v = dx / self.dt
+            w = np.arctan(dy/dx) / self.dt
+        v = np.clip(v, 0, MAX_V)
+        w = np.clip(w, -MAX_W, MAX_W)
+        return v, w
 
 
 
