@@ -99,6 +99,26 @@ def process_odom(
         yaws.append(yaw)
     return {"position": np.array(xys), "yaw": np.array(yaws)}
 
+def process_odom_and_comm(
+    odom_list: List,
+    comm_list: List,
+    odom_process_func: Any,
+    ang_offset: float = 0.0,
+) -> Dict[np.ndarray, np.ndarray]:
+    """
+    Process odom data from a topic that publishes nav_msgs/Odometry into position and yaw
+    """
+    xys = []
+    yaws = []
+    comms = []
+    for odom_msg in odom_list:
+        xy, yaw = odom_process_func(odom_msg, ang_offset)
+        xys.append(xy)
+        yaws.append(yaw)
+    for comm_msg in comm_list:
+        comm = custom_comm(comm_msg)
+        comms.append(comm)
+    return {"position": np.array(xys), "yaw": np.array(yaws), "command": np.array(comms)}
 
 def nav_to_xy_yaw(odom_msg, ang_offset: float) -> Tuple[List[float], float]:
     """
@@ -114,11 +134,17 @@ def nav_to_xy_yaw(odom_msg, ang_offset: float) -> Tuple[List[float], float]:
     return [position.x, position.y], yaw
 
 
-def custom_odom(odom_msg, ang_offset: float) -> Tuple[List[float], float]:
+def custom_odom(odom_msg, ang_offset: float) -> Tuple[List[float], float, int]:
     # dont use ang_offset
     ack = np.asarray(odom_msg.data)
     # [ack.location.x, ack.location.y, ack.location.z, ack.rotation.yaw]
     return [ack[0], ack[1]], ack[3]
+
+def custom_comm(comm_msg) -> int:
+    # dont use ang_offset
+    comm = np.asarray(comm_msg.data)
+    # [ack.location.x, ack.location.y, ack.location.z, ack.rotation.yaw]
+    return comm
 
 ############ Add custom odometry processing functions here ############
 
@@ -206,6 +232,90 @@ def get_images_and_odom(
 
     return img_data, traj_data
 
+def get_images_and_odom_and_command(
+    bag: rosbag.Bag,
+    imtopics: List[str] or str,
+    odomtopics: List[str] or str,
+    img_process_func: Any,
+    odom_process_func: Any,
+    rate: float = 4.0,
+    ang_offset: float = 0.0,
+    resx: int = 320,
+    resy: int = 240,
+):
+    """
+    Get image and odom data from a bag file
+
+    Args:
+        bag (rosbag.Bag): bag file
+        imtopics (list[str] or str): topic name(s) for image data
+        odomtopics (list[str] or str): topic name(s) for odom data
+        img_process_func (Any): function to process image data
+        odom_process_func (Any): function to process odom data
+        rate (float, optional): rate to sample data. Defaults to 4.0.
+        ang_offset (float, optional): angle offset to add to odom data. Defaults to 0.0.
+    Returns:
+        img_data (list): list of PIL images
+        traj_data (list): list of odom data
+    """
+    # check if bag has both topics
+    odomtopic = None
+    imtopic = None
+    if type(imtopics) == str:
+        imtopic = imtopics
+    else:
+        for imt in imtopics:
+            if bag.get_message_count(imt) > 0:
+                imtopic = imt
+                break
+    if type(odomtopics) == str:
+        odomtopic = odomtopics
+    else:
+        for ot in odomtopics:
+            if bag.get_message_count(ot) > 0:
+                odomtopic = ot
+                break
+    if not (imtopic and odomtopic):
+        # bag doesn't have both topics
+        return None, None
+
+    synced_imdata = []
+    synced_odomdata = []
+    synced_currdata = []
+    # get start time of bag in seconds
+    currtime = bag.get_start_time()
+
+    curr_imdata = None
+    curr_odomdata = None
+    curr_commdata = None
+
+    for topic, msg, t in bag.read_messages(topics=[imtopic, odomtopic, '/command']):
+        if topic == imtopic:
+            curr_imdata = msg
+        elif topic == odomtopic:
+            curr_odomdata = msg
+        elif topic == '/command':
+            curr_commdata = msg
+        if (t.to_sec() - currtime) >= 1.0 / rate:
+            if curr_imdata is not None and curr_odomdata is not None and curr_commdata is not None:
+                synced_imdata.append(curr_imdata)
+                synced_odomdata.append(curr_odomdata)
+                synced_currdata.append(curr_commdata)
+                currtime = t.to_sec()
+
+    img_data = process_images(
+        synced_imdata, 
+        img_process_func,
+        resx,
+        resy,
+    )
+    traj_data = process_odom_and_comm(
+        synced_odomdata,
+        synced_currdata,
+        odom_process_func,
+        ang_offset=ang_offset,
+    )
+    return img_data, traj_data
 
 def is_backwards(
     pos1: np.ndarray, yaw1: float, pos2: np.ndarray, eps: float = 1e-5
@@ -270,6 +380,99 @@ def filter_backwards(
         elif not start:
             cut_trajs.append(process_pair(new_traj_pairs))
             start = True
+    return cut_trajs
+
+
+def filter_backwards_comm(
+    img_list: List[Image.Image],
+    traj_data: Dict[str, np.ndarray],
+    start_slack: int = 0,
+    end_slack: int = 0,
+) -> Tuple[List[np.ndarray], List[int]]:
+    """
+    Cut out non-positive velocity segments of the trajectory
+    Args:
+        traj_type: type of trajectory to cut
+        img_list: list of images
+        traj_data: dictionary of position and yaw data
+        start_slack: number of points to ignore at the start of the trajectory
+        end_slack: number of points to ignore at the end of the trajectory
+    Returns:
+        cut_trajs: list of cut trajectories
+        start_times: list of start times of the cut trajectories
+    """
+    traj_pos = traj_data["position"]
+    traj_yaws = traj_data["yaw"]
+    traj_comm = traj_data["command"]
+    cut_trajs = []
+    start = True
+
+    def process_pair(traj_pair: list) -> Tuple[List, Dict]:
+        new_img_list, new_traj_data = zip(*traj_pair)
+        new_traj_data = np.array(new_traj_data)
+        new_traj_pos = new_traj_data[:, :2]
+        new_traj_yaws = new_traj_data[:, 2]
+        new_traj_comms = new_traj_data[:, 3].astype(int)
+        return (new_img_list, {"position": new_traj_pos, "yaw": new_traj_yaws, "command": new_traj_comms})
+
+    for i in range(max(start_slack, 1), len(traj_pos) - end_slack):
+        pos1 = traj_pos[i - 1]
+        yaw1 = traj_yaws[i - 1]
+        pos2 = traj_pos[i]
+        if not is_backwards(pos1, yaw1, pos2):
+            if start:
+                new_traj_pairs = [
+                    (img_list[i - 1], [*traj_pos[i - 1], traj_yaws[i - 1], traj_comm[i - 1]])
+                ]
+                start = False
+            elif i == len(traj_pos) - end_slack - 1:
+                cut_trajs.append(process_pair(new_traj_pairs))
+            else:
+                new_traj_pairs.append(
+                    (img_list[i - 1], [*traj_pos[i - 1], traj_yaws[i - 1], traj_comm[i - 1]])
+                )
+        elif not start:
+            cut_trajs.append(process_pair(new_traj_pairs))
+            start = True
+    return cut_trajs
+
+
+def fake_filter(
+    img_list: List[Image.Image],
+    traj_data: Dict[str, np.ndarray],
+    start_slack: int = 0,
+    end_slack: int = 0,
+) -> Tuple[List[np.ndarray], List[int]]:
+    """
+    Cut out non-positive velocity segments of the trajectory
+    Args:
+        traj_type: type of trajectory to cut
+        img_list: list of images
+        traj_data: dictionary of position and yaw data
+        start_slack: number of points to ignore at the start of the trajectory
+        end_slack: number of points to ignore at the end of the trajectory
+    Returns:
+        cut_trajs: list of cut trajectories
+        start_times: list of start times of the cut trajectories
+    """
+    traj_pos = traj_data["position"]
+    traj_yaws = traj_data["yaw"]
+    cut_trajs = []
+    new_traj_pairs = []
+    start = True
+
+    def process_pair(traj_pair: list) -> Tuple[List, Dict]:
+        new_img_list, new_traj_data = zip(*traj_pair)
+        new_traj_data = np.array(new_traj_data)
+        new_traj_pos = new_traj_data[:, :2]
+        new_traj_yaws = new_traj_data[:, 2]
+        return (new_img_list, {"position": new_traj_pos, "yaw": new_traj_yaws})
+
+    for i in range(len(traj_pos)):
+        new_traj_pairs.append(
+            (img_list[i], [*traj_pos[i], traj_yaws[i]])
+        )
+    cut_trajs.append(process_pair(new_traj_pairs))
     return cut_trajs
 
 

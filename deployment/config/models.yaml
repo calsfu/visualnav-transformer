@@ -14,5 +14,16 @@ nomad:
   config_path: "../../train/config/nomad.yaml"
   ckpt_path: "../model_weights/nomad.pth"
 
+control:
+  config_path: "../../train/config/control.yaml"
+  ckpt_path: "/data/linden/logs/control_no_commands/bank/latest.pth"
+
+wide:
+  config_path: "../../train/config/wide.yaml"
+  ckpt_path: "/data/linden/logs/wide_comm/bank/latest.pth"
+
+composed:
+  config_path: "../../train/config/composed.yaml"
+  ckpt_path: "/data/linden/logs/control_NC_cutless/bank/latest.pth"
 
 # add your own model configs here after saving the *.pth file to ../model_weight
